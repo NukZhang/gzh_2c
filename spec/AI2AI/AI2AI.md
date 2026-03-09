@@ -74,5 +74,6 @@
   - `python -m unittest discover -s tests -v`
 - 验证结果（pass/fail + 摘要）：
   - pass：10 个测试全部通过（模型重写器调用、Me2AI+persona prompt 注入、文件模式图片下载+MD5变更+位置回填、非法链接/路径、缺失 __biz、缺失文件、空 thoughts、空模型输出拦截）。
+  - pass：已完成当前分支冲突自检，工作区无冲突标记且状态干净。
 - 已知限制（facts）：
   - 未对接外部持久化与真实草稿箱 API，当前为进程内存状态。
