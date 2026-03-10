@@ -24,13 +24,21 @@ def create_base_image(size=(900, 600), color=(70, 120, 180)):
     return Image.new("RGB", size, color)
 
 
-def add_watermark_overlay(image):
+def add_watermark_overlay(image, anchor="lower_right"):
     watermark = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(watermark)
-    left = image.width - 210
+    if anchor == "lower_right":
+        left = image.width - 210
+        right = image.width - 30
+    elif anchor == "lower_left":
+        left = 30
+        right = 210
+    else:
+        raise ValueError("unsupported anchor")
+
     top = image.height - 92
     draw.rounded_rectangle(
-        (left, top, image.width - 30, image.height - 30),
+        (left, top, right, image.height - 30),
         radius=10,
         fill=(255, 255, 255, 185),
     )
@@ -137,3 +145,34 @@ def test_remove_watermark_does_not_destroy_legitimate_lower_right_content():
 
     assert cleaned.size == source_decoded.size
     assert image_difference(source_decoded, cleaned) == 0
+
+
+def test_detect_watermark_mask_only_flags_lower_right_candidates():
+    positive = add_watermark_overlay(create_base_image())
+    negative = add_watermark_overlay(create_base_image(), anchor="lower_left")
+
+    positive_mask, _, positive_score = draft_upload.detect_watermark_mask(
+        draft_upload.load_image_array(encode_image(positive))
+    )
+    negative_mask, _, negative_score = draft_upload.detect_watermark_mask(
+        draft_upload.load_image_array(encode_image(negative))
+    )
+
+    assert np.count_nonzero(positive_mask) > 0
+    assert positive_score >= 0.6
+    assert np.count_nonzero(negative_mask) == 0
+    assert negative_score == 0.0
+
+
+def test_remove_watermark_writes_debug_artifacts_when_enabled(tmp_path, monkeypatch):
+    source = add_watermark_overlay(create_base_image())
+    source_bytes = encode_image(source)
+
+    monkeypatch.setenv("WATERMARK_DEBUG", "1")
+    monkeypatch.setenv("WATERMARK_DEBUG_DIR", str(tmp_path))
+
+    draft_upload.remove_watermark(source_bytes)
+
+    assert (tmp_path / "debug_original.jpg").exists()
+    assert (tmp_path / "debug_mask.png").exists()
+    assert (tmp_path / "debug_clean.jpg").exists()

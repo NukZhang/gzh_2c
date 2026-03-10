@@ -4,6 +4,7 @@ import yaml
 import json
 import io
 import re
+import os
 import numpy as np
 import base64
 import cv2
@@ -35,6 +36,26 @@ def encode_image_array(image_bgr, quality=95):
     output = io.BytesIO()
     Image.fromarray(rgb).save(output, format='JPEG', quality=quality)
     return output.getvalue()
+
+
+def write_debug_artifacts(original_bgr, mask, cleaned_bgr):
+    if os.getenv('WATERMARK_DEBUG') != '1':
+        return
+
+    debug_dir = os.getenv('WATERMARK_DEBUG_DIR', '.')
+    os.makedirs(debug_dir, exist_ok=True)
+
+    Image.fromarray(cv2.cvtColor(original_bgr, cv2.COLOR_BGR2RGB)).save(
+        os.path.join(debug_dir, 'debug_original.jpg'),
+        format='JPEG',
+        quality=95,
+    )
+    Image.fromarray(mask).save(os.path.join(debug_dir, 'debug_mask.png'), format='PNG')
+    Image.fromarray(cv2.cvtColor(cleaned_bgr, cv2.COLOR_BGR2RGB)).save(
+        os.path.join(debug_dir, 'debug_clean.jpg'),
+        format='JPEG',
+        quality=95,
+    )
 
 
 def score_watermark_candidate(component_mask):
@@ -156,6 +177,7 @@ def remove_watermark(image_data):
 
         print("    检测到水印，置信度: {:.2f}".format(score))
         cleaned = inpaint_watermark(image_bgr, mask, roi_bounds)
+        write_debug_artifacts(image_bgr, mask, cleaned)
         return encode_image_array(cleaned, quality=95)
     except Exception as e:
         print("    图像处理失败: {}，保留原图".format(e))
