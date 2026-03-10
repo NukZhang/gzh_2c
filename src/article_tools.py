@@ -39,6 +39,16 @@ def extract_article_image_urls(html):
     return list(OrderedDict.fromkeys(urls))
 
 
+def fetch_article_image_urls(article_url, session=None, user_agent=None, timeout=20):
+    html = fetch_article_html(
+        article_url,
+        session=session,
+        user_agent=user_agent,
+        timeout=timeout,
+    )
+    return extract_article_image_urls(html)
+
+
 def download_image(image_url, session=None, timeout=20):
     client = session or requests
     normalized_url = "https:" + image_url if image_url.startswith("//") else image_url
@@ -181,3 +191,50 @@ def analyze_article(
             json.dump(_json_safe_result(result), handle, ensure_ascii=False, indent=2)
 
     return result
+
+
+def prepare_article_images(
+    article_url,
+    limit=None,
+    session=None,
+    analyze_image_fn=None,
+    download_image_fn=None,
+):
+    html = fetch_article_html(article_url, session=session)
+    image_urls = extract_article_image_urls(html)
+    if limit is not None:
+        image_urls = image_urls[:limit]
+
+    return process_article_images(
+        image_urls,
+        output_dir=None,
+        save_images=False,
+        download_image_fn=download_image_fn,
+        analyze_image_fn=analyze_image_fn,
+        session=session,
+    )
+
+
+def upload_processed_images(processed_result, upload_image_fn):
+    uploaded = []
+    for item in processed_result["images"]:
+        if item.get("status") not in {"processed", "unchanged"}:
+            continue
+        if not item.get("cleaned_bytes"):
+            continue
+
+        upload_result = upload_image_fn(item["cleaned_bytes"])
+        uploaded.append(
+            {
+                "index": item["index"],
+                "url": item["url"],
+                "result": upload_result,
+            }
+        )
+
+    return {
+        "images": uploaded,
+        "counts": {
+            "attempted": len(uploaded),
+        },
+    }

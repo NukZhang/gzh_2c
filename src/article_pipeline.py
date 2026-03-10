@@ -1,6 +1,7 @@
 import argparse
 
 import article_tools
+import draft_upload
 
 
 def build_parser():
@@ -25,13 +26,34 @@ def run_analyze(args):
         args.url,
         output_dir=args.output,
         save_images=args.save_images,
+        analyze_image_fn=draft_upload.analyze_watermark,
     )
     print("分析完成: {} 张图片".format(len(result["images"])))
     return 0
 
 
 def run_upload(args):
-    print("upload 模式尚未完成，当前请先使用 --dry-run 规划流程")
+    processed = article_tools.prepare_article_images(
+        args.url,
+        limit=args.limit,
+        analyze_image_fn=draft_upload.analyze_watermark,
+    )
+    print("上传前处理完成: {} 张图片".format(processed["counts"]["total"]))
+
+    if args.dry_run:
+        print("dry-run: 未执行微信上传")
+        return 0
+
+    config = draft_upload.load_config()
+    access_token = draft_upload.get_access_token(
+        config["wechat"]["appid"],
+        config["wechat"]["secret"],
+    )
+    upload_result = article_tools.upload_processed_images(
+        processed,
+        lambda image_bytes: draft_upload.upload_permanent_image(access_token, image_bytes),
+    )
+    print("上传完成: {} 张图片".format(upload_result["counts"]["attempted"]))
     return 0
 
 

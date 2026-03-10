@@ -11,6 +11,7 @@ import cv2
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from PIL import Image
 from playwright.sync_api import sync_playwright
+import article_tools
 
 WATERMARK_CONFIDENCE_THRESHOLD = 0.55
 
@@ -168,19 +169,39 @@ def inpaint_watermark(image_bgr, mask, roi_bounds):
     cleaned[y0:y0 + roi_h, x0:x0 + roi_w] = cv2.inpaint(roi_image, roi_mask, 3, cv2.INPAINT_TELEA)
     return cleaned
 
+
+def analyze_watermark(image_data):
+    image_bgr = load_image_array(image_data)
+    mask, roi_bounds, score = detect_watermark_mask(image_bgr)
+
+    if score < WATERMARK_CONFIDENCE_THRESHOLD or np.count_nonzero(mask) == 0:
+        return {
+            "score": score,
+            "mask": mask,
+            "roi_bounds": roi_bounds,
+            "cleaned_bytes": image_data,
+            "changed": False,
+        }
+
+    cleaned = inpaint_watermark(image_bgr, mask, roi_bounds)
+    write_debug_artifacts(image_bgr, mask, cleaned)
+    return {
+        "score": score,
+        "mask": mask,
+        "roi_bounds": roi_bounds,
+        "cleaned_bytes": encode_image_array(cleaned, quality=95),
+        "changed": True,
+    }
+
 def remove_watermark(image_data):
     try:
-        image_bgr = load_image_array(image_data)
-        mask, roi_bounds, score = detect_watermark_mask(image_bgr)
-
-        if score < WATERMARK_CONFIDENCE_THRESHOLD or np.count_nonzero(mask) == 0:
+        result = analyze_watermark(image_data)
+        if not result["changed"]:
             print("    未检测到高置信度水印，保留原图")
             return image_data
 
-        print("    检测到水印，置信度: {:.2f}".format(score))
-        cleaned = inpaint_watermark(image_bgr, mask, roi_bounds)
-        write_debug_artifacts(image_bgr, mask, cleaned)
-        return encode_image_array(cleaned, quality=95)
+        print("    检测到水印，置信度: {:.2f}".format(result["score"]))
+        return result["cleaned_bytes"]
     except Exception as e:
         print("    图像处理失败: {}，保留原图".format(e))
         return image_data
@@ -202,29 +223,7 @@ def upload_draft(access_token, articles):
     return resp.json()
 
 def fetch_article_images(article_url):
-    images = []
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        page.goto(article_url, wait_until='networkidle')
-        page.wait_for_timeout(5000)
-        
-        js_content = page.query_selector('#js_content')
-        if js_content:
-            print('  文章内容长度: {} 字符'.format(len(js_content.inner_text())))
-        
-        img_elements = page.query_selector_all('img[data-src]')
-        print('  找到 {} 个图片元素'.format(len(img_elements)))
-        
-        for img in img_elements:
-            data_src = img.get_attribute('data-src')
-            if data_src and 'mmbiz' in data_src:
-                images.append(data_src)
-        
-        browser.close()
-    
-    seen = set()
-    return [x for x in images if not (x in seen or seen.add(x))]
+    return article_tools.fetch_article_image_urls(article_url)
 
 def main():
     config = load_config()

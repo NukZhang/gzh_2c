@@ -229,3 +229,14 @@ def test_remove_watermark_accepts_borderline_confidence(monkeypatch):
 
     assert cleaned.size == source_decoded.size
     assert roi_difference(source_decoded, cleaned) > 0
+
+
+def test_analyze_watermark_returns_mask_and_cleaned_bytes():
+    source = add_watermark_overlay(create_base_image())
+    source_bytes = encode_image(source)
+
+    result = draft_upload.analyze_watermark(source_bytes)
+
+    assert result["score"] >= draft_upload.WATERMARK_CONFIDENCE_THRESHOLD
+    assert np.count_nonzero(result["mask"]) > 0
+    assert result["cleaned_bytes"]

@@ -106,6 +106,33 @@ def test_article_pipeline_analyze_writes_summary_json(tmp_path, monkeypatch):
     assert summary["images"][0]["status"] == "processed"
 
 
+def test_article_pipeline_analyze_uses_draft_upload_watermark_analyzer(tmp_path, monkeypatch):
+    import article_pipeline
+    import draft_upload
+
+    captured = {}
+
+    def fake_analyze_article(
+        article_url,
+        output_dir,
+        save_images=True,
+        session=None,
+        analyze_image_fn=None,
+        download_image_fn=None,
+    ):
+        captured["analyze_image_fn"] = analyze_image_fn
+        return {"images": [], "counts": {"total": 0, "processed": 0, "unchanged": 0, "failed": 0}}
+
+    monkeypatch.setattr(article_tools, "analyze_article", fake_analyze_article)
+
+    exit_code = article_pipeline.main(
+        ["analyze", "--url", "https://mp.weixin.qq.com/s/example", "--output", str(tmp_path)]
+    )
+
+    assert exit_code == 0
+    assert captured["analyze_image_fn"] is draft_upload.analyze_watermark
+
+
 def test_analyze_article_continues_when_one_image_download_fails(tmp_path, monkeypatch):
     html = """
     <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/one/640?wx_fmt=png&amp;from=appmsg" />
@@ -135,3 +162,78 @@ def test_analyze_article_continues_when_one_image_download_fails(tmp_path, monke
         "unchanged",
     ]
     assert summary["counts"]["failed"] == 1
+
+
+def test_article_pipeline_upload_dry_run_skips_wechat_upload(monkeypatch):
+    import article_pipeline
+
+    events = []
+    html = """
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&amp;from=appmsg" />
+    """
+
+    monkeypatch.setattr(
+        article_tools,
+        "fetch_article_html",
+        lambda article_url, session=None, user_agent=None, timeout=20: events.append("fetch") or html,
+    )
+    monkeypatch.setattr(
+        article_tools,
+        "process_article_images",
+        lambda image_urls, output_dir=None, save_images=False, download_image_fn=None, analyze_image_fn=None, session=None: (
+            events.append("process")
+            or {
+                "images": [
+                    {
+                        "index": 1,
+                        "url": image_urls[0],
+                        "size": [120, 80],
+                        "score": 0.81,
+                        "mask_pixels": 50,
+                        "changed": True,
+                        "diff_sum": 1234,
+                        "status": "processed",
+                        "error": None,
+                        "cleaned_bytes": b"processed",
+                    }
+                ],
+                "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+            }
+        ),
+    )
+
+    upload_calls = []
+    monkeypatch.setattr(
+        article_tools,
+        "upload_processed_images",
+        lambda *args, **kwargs: upload_calls.append((args, kwargs)) or {"images": [], "counts": {}},
+        raising=False,
+    )
+
+    exit_code = article_pipeline.main(
+        ["upload", "--url", "https://mp.weixin.qq.com/s/example", "--dry-run"]
+    )
+
+    assert exit_code == 0
+    assert events == ["fetch", "process"]
+    assert upload_calls == []
+
+
+def test_legacy_fetch_article_images_uses_shared_extractor(monkeypatch):
+    import draft_upload
+
+    html = """
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&amp;from=appmsg" />
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_jpg/bar/640?wx_fmt=jpeg&amp;from=appmsg" />
+    """
+
+    monkeypatch.setattr(
+        article_tools,
+        "fetch_article_html",
+        lambda article_url, session=None, user_agent=None, timeout=20: html,
+    )
+
+    assert draft_upload.fetch_article_images("https://mp.weixin.qq.com/s/example") == [
+        "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/bar/640?wx_fmt=jpeg&from=appmsg",
+    ]
