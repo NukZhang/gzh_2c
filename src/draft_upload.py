@@ -106,7 +106,7 @@ def detect_watermark_mask(image_bgr):
     saturation = hsv[:, :, 1]
     gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
-    value_threshold = max(185, int(np.mean(value) + 18))
+    value_threshold = min(255, max(185, int(np.mean(value) + 18)))
     bright_mask = np.where((value >= value_threshold) & (saturation <= 115), 255, 0).astype(np.uint8)
     bright_mask = cv2.morphologyEx(
         bright_mask,

@@ -1,4 +1,5 @@
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -176,3 +177,28 @@ def test_remove_watermark_writes_debug_artifacts_when_enabled(tmp_path, monkeypa
     assert (tmp_path / "debug_original.jpg").exists()
     assert (tmp_path / "debug_mask.png").exists()
     assert (tmp_path / "debug_clean.jpg").exists()
+
+
+def test_detect_watermark_mask_does_not_crash_on_bright_banner():
+    script = """
+import io
+import sys
+from PIL import Image
+sys.path.insert(0, 'src')
+import draft_upload
+
+img = Image.new('RGB', (1080, 360), (255, 255, 255))
+buf = io.BytesIO()
+img.save(buf, format='JPEG', quality=95)
+image_bgr = draft_upload.load_image_array(buf.getvalue())
+mask, roi_bounds, score = draft_upload.detect_watermark_mask(image_bgr)
+print(mask.shape, roi_bounds, score)
+"""
+    result = subprocess.run(
+        [sys.executable, "-u", "-c", script],
+        cwd=str(Path(__file__).resolve().parents[1]),
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr or result.stdout
