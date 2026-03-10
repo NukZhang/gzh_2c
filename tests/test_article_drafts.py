@@ -31,3 +31,19 @@ cover_image: image1
     assert draft["meta"]["title"] == "示例标题"
     assert draft["meta"]["cover_image"] == "image1"
     assert "{{image1}}" in draft["body"]
+
+
+def test_render_markdown_body_replaces_image_placeholders():
+    html = article_drafts.render_markdown_body(
+        "## 小标题\n\n第一段正文。\n\n{{image1}}\n",
+        {"image1": "https://example.com/image1.jpg"},
+    )
+
+    assert "<h2>小标题</h2>" in html
+    assert "https://example.com/image1.jpg" in html
+    assert "{{image1}}" not in html
+
+
+def test_render_markdown_body_fails_on_unresolved_placeholder():
+    with pytest.raises(ValueError):
+        article_drafts.render_markdown_body("{{image2}}", {"image1": "https://example.com/image1.jpg"})

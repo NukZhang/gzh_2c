@@ -1,3 +1,5 @@
+import html
+import re
 from pathlib import Path
 
 import yaml
@@ -32,3 +34,51 @@ def load_markdown_draft(markdown_path):
         "meta": meta,
         "body": body.strip(),
     }
+
+
+def _render_inline(text):
+    escaped = html.escape(text)
+    escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+    escaped = re.sub(r"\[(.+?)\]\((.+?)\)", r'<a href="\2">\1</a>', escaped)
+    return escaped
+
+
+def _render_placeholder(placeholder_key, image_map):
+    image_url = image_map[placeholder_key]
+    return (
+        '<p style="text-align:center;margin:15px 0;">'
+        '<img src="{}" style="max-width:100%;border-radius:8px;"/>'
+        "</p>"
+    ).format(html.escape(image_url, quote=True))
+
+
+def _validate_placeholders(body_markdown, image_map):
+    placeholders = re.findall(r"\{\{(image\d+)\}\}", body_markdown)
+    missing = [name for name in placeholders if name not in image_map]
+    if missing:
+        raise ValueError("unresolved image placeholders: {}".format(", ".join(sorted(set(missing)))))
+
+
+def render_markdown_body(body_markdown, image_map):
+    _validate_placeholders(body_markdown, image_map)
+
+    blocks = [block.strip() for block in re.split(r"\n\s*\n", body_markdown.strip()) if block.strip()]
+    rendered_blocks = []
+
+    for block in blocks:
+        if re.fullmatch(r"\{\{image\d+\}\}", block):
+            key = re.findall(r"\{\{(image\d+)\}\}", block)[0]
+            rendered_blocks.append(_render_placeholder(key, image_map))
+            continue
+
+        if block.startswith("## "):
+            rendered_blocks.append("<h2>{}</h2>".format(_render_inline(block[3:].strip())))
+            continue
+
+        if block.startswith("# "):
+            rendered_blocks.append("<h1>{}</h1>".format(_render_inline(block[2:].strip())))
+            continue
+
+        rendered_blocks.append("<p>{}</p>".format(_render_inline(block.replace("\n", "<br/>"))))
+
+    return "".join(rendered_blocks)
