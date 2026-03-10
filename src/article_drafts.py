@@ -7,16 +7,40 @@ import yaml
 
 REQUIRED_META_FIELDS = {
     "title",
-    "digest",
     "content_source_url",
     "cover_image",
 }
+MAX_DIGEST_LENGTH = 120
 
 
 def validate_draft_meta(meta):
     missing = [field for field in REQUIRED_META_FIELDS if not meta.get(field)]
     if missing:
         raise ValueError("missing required frontmatter fields: {}".format(", ".join(sorted(missing))))
+
+
+def _split_blocks(body_markdown):
+    return [block.strip() for block in re.split(r"\n\s*\n", body_markdown.strip()) if block.strip()]
+
+
+def _derive_digest(body_markdown):
+    for block in _split_blocks(body_markdown):
+        if re.fullmatch(r"\{\{image\d+\}\}", block):
+            continue
+        if re.match(r"^#{1,6}\s+", block):
+            continue
+        normalized = re.sub(r"\s+", " ", block).strip()
+        if normalized:
+            return normalized[:MAX_DIGEST_LENGTH]
+
+    raise ValueError("digest cannot be derived from markdown body")
+
+
+def _normalize_draft_meta(meta, body_markdown):
+    normalized = dict(meta)
+    if not normalized.get("digest"):
+        normalized["digest"] = _derive_digest(body_markdown)
+    return normalized
 
 
 def load_markdown_draft(markdown_path):
@@ -27,12 +51,13 @@ def load_markdown_draft(markdown_path):
 
     _, remainder = text.split("---\n", 1)
     frontmatter_text, body = remainder.split("\n---\n", 1)
-    meta = yaml.safe_load(frontmatter_text) or {}
+    body = body.strip()
+    meta = _normalize_draft_meta(yaml.safe_load(frontmatter_text) or {}, body)
     validate_draft_meta(meta)
 
     return {
         "meta": meta,
-        "body": body.strip(),
+        "body": body,
     }
 
 
@@ -62,7 +87,7 @@ def _validate_placeholders(body_markdown, image_map):
 def render_markdown_body(body_markdown, image_map):
     _validate_placeholders(body_markdown, image_map)
 
-    blocks = [block.strip() for block in re.split(r"\n\s*\n", body_markdown.strip()) if block.strip()]
+    blocks = _split_blocks(body_markdown)
     rendered_blocks = []
 
     for block in blocks:

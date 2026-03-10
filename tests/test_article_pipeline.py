@@ -233,6 +233,60 @@ cover_image: image1
     assert upload_calls == []
 
 
+def test_upload_dry_run_accepts_markdown_without_digest(tmp_path, monkeypatch):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+content_source_url: https://example.com/article
+cover_image: image1
+---
+
+第一段正文，应该自动生成摘要。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        article_tools,
+        "prepare_article_images",
+        lambda article_url, limit=None, session=None, analyze_image_fn=None, download_image_fn=None: {
+            "images": [
+                {
+                    "index": 1,
+                    "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                    "size": [120, 80],
+                    "score": 0.81,
+                    "mask_pixels": 50,
+                    "changed": True,
+                    "diff_sum": 1234,
+                    "status": "processed",
+                    "error": None,
+                    "cleaned_bytes": b"processed",
+                }
+            ],
+            "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+        },
+    )
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--markdown",
+            str(markdown_path),
+            "--dry-run",
+        ]
+    )
+
+    assert exit_code == 0
+
+
 def test_upload_dry_run_writes_preview_files(tmp_path, monkeypatch):
     import article_pipeline
 
