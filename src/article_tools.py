@@ -137,7 +137,23 @@ def process_article_images(
                 }
             )
 
-    return {"images": image_results}
+    counts = {
+        "total": len(image_results),
+        "processed": sum(1 for item in image_results if item["status"] == "processed"),
+        "unchanged": sum(1 for item in image_results if item["status"] == "unchanged"),
+        "failed": sum(1 for item in image_results if item["status"] not in {"processed", "unchanged"}),
+    }
+
+    return {"images": image_results, "counts": counts}
+
+
+def _json_safe_result(result):
+    safe_images = []
+    for item in result["images"]:
+        safe_item = dict(item)
+        safe_item.pop("cleaned_bytes", None)
+        safe_images.append(safe_item)
+    return {"images": safe_images, "counts": dict(result.get("counts", {}))}
 
 
 def analyze_article(
@@ -162,6 +178,6 @@ def analyze_article(
     if output_dir:
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "summary.json"), "w", encoding="utf-8") as handle:
-            json.dump(result, handle, ensure_ascii=False, indent=2)
+            json.dump(_json_safe_result(result), handle, ensure_ascii=False, indent=2)
 
     return result

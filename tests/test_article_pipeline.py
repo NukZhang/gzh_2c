@@ -104,3 +104,34 @@ def test_article_pipeline_analyze_writes_summary_json(tmp_path, monkeypatch):
     assert exit_code == 0
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
     assert summary["images"][0]["status"] == "processed"
+
+
+def test_analyze_article_continues_when_one_image_download_fails(tmp_path, monkeypatch):
+    html = """
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/one/640?wx_fmt=png&amp;from=appmsg" />
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/two/640?wx_fmt=png&amp;from=appmsg" />
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/three/640?wx_fmt=png&amp;from=appmsg" />
+    """
+    raw_bytes = make_image_bytes()
+
+    monkeypatch.setattr(article_tools, "fetch_article_html", lambda article_url, session=None, user_agent=None, timeout=20: html)
+
+    def fake_download(image_url, session=None, timeout=20):
+        if "two" in image_url:
+            raise RuntimeError("boom")
+        return raw_bytes
+
+    summary = article_tools.analyze_article(
+        "https://mp.weixin.qq.com/s/example",
+        output_dir=tmp_path,
+        save_images=False,
+        analyze_image_fn=lambda image_bytes: {"cleaned_bytes": image_bytes, "mask": None, "score": 0.0},
+        download_image_fn=fake_download,
+    )
+
+    assert [item["status"] for item in summary["images"]] == [
+        "unchanged",
+        "download_failed",
+        "unchanged",
+    ]
+    assert summary["counts"]["failed"] == 1
