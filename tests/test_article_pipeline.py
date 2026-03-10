@@ -1,4 +1,5 @@
 import io
+import json
 import sys
 from pathlib import Path
 
@@ -66,3 +67,40 @@ def test_process_article_images_returns_per_image_summary(tmp_path):
     assert (tmp_path / "01_original.jpg").exists()
     assert (tmp_path / "01_mask.png").exists()
     assert (tmp_path / "01_clean.jpg").exists()
+
+
+def test_article_pipeline_analyze_writes_summary_json(tmp_path, monkeypatch):
+    import article_pipeline
+
+    html = """
+    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&amp;from=appmsg" />
+    """
+
+    monkeypatch.setattr(article_tools, "fetch_article_html", lambda article_url, session=None, user_agent=None, timeout=20: html)
+    monkeypatch.setattr(
+        article_tools,
+        "process_article_images",
+        lambda image_urls, output_dir=None, save_images=False, download_image_fn=None, analyze_image_fn=None, session=None: {
+            "images": [
+                {
+                    "index": 1,
+                    "url": image_urls[0],
+                    "size": [120, 80],
+                    "score": 0.81,
+                    "mask_pixels": 50,
+                    "changed": True,
+                    "diff_sum": 1234,
+                    "status": "processed",
+                    "error": None,
+                }
+            ]
+        },
+    )
+
+    exit_code = article_pipeline.main(
+        ["analyze", "--url", "https://mp.weixin.qq.com/s/example", "--output", str(tmp_path)]
+    )
+
+    assert exit_code == 0
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["images"][0]["status"] == "processed"

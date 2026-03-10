@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import re
 from collections import OrderedDict
@@ -137,3 +138,30 @@ def process_article_images(
             )
 
     return {"images": image_results}
+
+
+def analyze_article(
+    article_url,
+    output_dir,
+    save_images=True,
+    session=None,
+    analyze_image_fn=None,
+    download_image_fn=None,
+):
+    html = fetch_article_html(article_url, session=session)
+    image_urls = extract_article_image_urls(html)
+    result = process_article_images(
+        image_urls,
+        output_dir=output_dir,
+        save_images=save_images,
+        download_image_fn=download_image_fn,
+        analyze_image_fn=analyze_image_fn,
+        session=session,
+    )
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        with open(os.path.join(output_dir, "summary.json"), "w", encoding="utf-8") as handle:
+            json.dump(result, handle, ensure_ascii=False, indent=2)
+
+    return result
