@@ -56,6 +56,22 @@ def add_qr_like_badge(image):
     return image
 
 
+def add_caption_bar(image):
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    left = image.width - 320
+    top = image.height - 104
+    draw.rounded_rectangle(
+        (left, top, image.width - 24, image.height - 24),
+        radius=14,
+        fill=(248, 248, 248, 220),
+    )
+    draw.rectangle((left + 18, top + 20, left + 86, top + 74), fill=(244, 163, 49, 255))
+    draw.text((left + 104, top + 26), "CHART NOTE", fill=(45, 45, 45, 255))
+    draw.text((left + 104, top + 56), "Q4 +18%", fill=(45, 45, 45, 255))
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
 def roi_difference(left_image, right_image, roi_ratio=0.3):
     width, height = left_image.size
     roi = (
@@ -66,6 +82,12 @@ def roi_difference(left_image, right_image, roi_ratio=0.3):
     )
     left = np.array(left_image.crop(roi), dtype=np.int16)
     right = np.array(right_image.crop(roi), dtype=np.int16)
+    return np.abs(left - right).sum()
+
+
+def image_difference(left_image, right_image):
+    left = np.array(left_image, dtype=np.int16)
+    right = np.array(right_image, dtype=np.int16)
     return np.abs(left - right).sum()
 
 
@@ -91,3 +113,27 @@ def test_remove_watermark_cleans_qr_like_badge():
 
     assert cleaned.size == source_decoded.size
     assert roi_difference(source_decoded, cleaned) > 5000
+
+
+def test_remove_watermark_leaves_clean_image_unchanged():
+    source = create_base_image(color=(96, 144, 188))
+    source_bytes = encode_image(source)
+    source_decoded = decode_image(source_bytes)
+
+    cleaned_bytes = draft_upload.remove_watermark(source_bytes)
+    cleaned = decode_image(cleaned_bytes)
+
+    assert cleaned.size == source_decoded.size
+    assert image_difference(source_decoded, cleaned) == 0
+
+
+def test_remove_watermark_does_not_destroy_legitimate_lower_right_content():
+    source = add_caption_bar(create_base_image(color=(70, 112, 176)))
+    source_bytes = encode_image(source)
+    source_decoded = decode_image(source_bytes)
+
+    cleaned_bytes = draft_upload.remove_watermark(source_bytes)
+    cleaned = decode_image(cleaned_bytes)
+
+    assert cleaned.size == source_decoded.size
+    assert image_difference(source_decoded, cleaned) == 0

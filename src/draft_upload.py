@@ -47,11 +47,18 @@ def score_watermark_candidate(component_mask):
     area_ratio = area / float(roi_h * roi_w)
     x_min, x_max = xs.min(), xs.max()
     y_min, y_max = ys.min(), ys.max()
+    bbox_w = x_max - x_min + 1
+    bbox_h = y_max - y_min + 1
     bbox_area = float((x_max - x_min + 1) * (y_max - y_min + 1))
     bbox_area_ratio = bbox_area / float(roi_h * roi_w)
+    bbox_width_ratio = bbox_w / float(roi_w)
+    bbox_height_ratio = bbox_h / float(roi_h)
     fill_ratio = area / max(bbox_area, 1.0)
     right_bias = max(0.0, ((x_max + 1) / float(roi_w) - 0.65) / 0.35)
     bottom_bias = max(0.0, ((y_max + 1) / float(roi_h) - 0.60) / 0.40)
+
+    if bbox_area_ratio > 0.60 or (bbox_width_ratio > 0.85 and bbox_height_ratio > 0.55):
+        return 0.0
 
     score = min(area_ratio / 0.08, 0.20)
     score += min(bbox_area_ratio / 0.20, 0.25)
