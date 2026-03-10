@@ -82,3 +82,24 @@ def render_markdown_body(body_markdown, image_map):
         rendered_blocks.append("<p>{}</p>".format(_render_inline(block.replace("\n", "<br/>"))))
 
     return "".join(rendered_blocks)
+
+
+def resolve_cover_image_key(meta, image_map):
+    cover_key = meta.get("cover_image")
+    if cover_key not in image_map:
+        raise ValueError("cover_image reference not found: {}".format(cover_key))
+    return cover_key
+
+
+def build_article_payload(draft, rendered_html, thumb_media_id, default_author):
+    meta = draft["meta"]
+    return {
+        "title": meta["title"],
+        "author": meta.get("author") or default_author,
+        "content": rendered_html,
+        "thumb_media_id": thumb_media_id,
+        "digest": meta["digest"],
+        "content_source_url": meta["content_source_url"],
+        "need_open_comment": 0,
+        "only_fans_can_comment": 0,
+    }

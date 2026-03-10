@@ -47,3 +47,33 @@ def test_render_markdown_body_replaces_image_placeholders():
 def test_render_markdown_body_fails_on_unresolved_placeholder():
     with pytest.raises(ValueError):
         article_drafts.render_markdown_body("{{image2}}", {"image1": "https://example.com/image1.jpg"})
+
+
+def test_build_article_payload_uses_cover_image_mapping():
+    draft = {
+        "meta": {
+            "title": "示例标题",
+            "digest": "示例摘要",
+            "content_source_url": "https://example.com/article",
+        },
+        "body": "第一段正文。",
+    }
+
+    payload = article_drafts.build_article_payload(
+        draft,
+        rendered_html="<p>第一段正文。</p>",
+        thumb_media_id="thumb123",
+        default_author="默认作者",
+    )
+
+    assert payload["title"] == "示例标题"
+    assert payload["thumb_media_id"] == "thumb123"
+    assert payload["author"] == "默认作者"
+
+
+def test_cover_image_reference_must_exist():
+    with pytest.raises(ValueError):
+        article_drafts.resolve_cover_image_key(
+            {"cover_image": "image3"},
+            {"image1": "https://example.com/1.jpg", "image2": "https://example.com/2.jpg"},
+        )
