@@ -48,17 +48,19 @@ def score_watermark_candidate(component_mask):
     x_min, x_max = xs.min(), xs.max()
     y_min, y_max = ys.min(), ys.max()
     bbox_area = float((x_max - x_min + 1) * (y_max - y_min + 1))
+    bbox_area_ratio = bbox_area / float(roi_h * roi_w)
     fill_ratio = area / max(bbox_area, 1.0)
-    touch_right = x_max >= roi_w - max(6, int(roi_w * 0.06))
-    touch_bottom = y_max >= roi_h - max(6, int(roi_h * 0.08))
+    right_bias = max(0.0, ((x_max + 1) / float(roi_w) - 0.65) / 0.35)
+    bottom_bias = max(0.0, ((y_max + 1) / float(roi_h) - 0.60) / 0.40)
 
-    score = min(area_ratio / 0.08, 0.35)
-    if touch_right:
-        score += 0.25
-    if touch_bottom:
-        score += 0.25
+    score = min(area_ratio / 0.08, 0.20)
+    score += min(bbox_area_ratio / 0.20, 0.25)
+    score += min(right_bias, 1.0) * 0.20
+    score += min(bottom_bias, 1.0) * 0.20
     if fill_ratio >= 0.18:
         score += 0.15
+    elif bbox_area_ratio >= 0.08:
+        score += 0.12
 
     return score
 
@@ -74,19 +76,32 @@ def detect_watermark_mask(image_bgr):
     hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
     value = hsv[:, :, 2]
     saturation = hsv[:, :, 1]
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
 
     value_threshold = max(185, int(np.mean(value) + 18))
-    candidate_mask = np.where((value >= value_threshold) & (saturation <= 115), 255, 0).astype(np.uint8)
-    candidate_mask = cv2.morphologyEx(
-        candidate_mask,
+    bright_mask = np.where((value >= value_threshold) & (saturation <= 115), 255, 0).astype(np.uint8)
+    bright_mask = cv2.morphologyEx(
+        bright_mask,
         cv2.MORPH_CLOSE,
         np.ones((5, 5), dtype=np.uint8),
     )
-    candidate_mask = cv2.morphologyEx(
-        candidate_mask,
+    bright_mask = cv2.morphologyEx(
+        bright_mask,
         cv2.MORPH_OPEN,
         np.ones((3, 3), dtype=np.uint8),
     )
+
+    edge_map = cv2.Canny(gray, 80, 180)
+    edge_density = cv2.blur((edge_map > 0).astype(np.float32), (11, 11))
+    edge_mask = np.where(edge_density >= 0.10, 255, 0).astype(np.uint8)
+    edge_mask = cv2.dilate(edge_mask, np.ones((9, 9), dtype=np.uint8), iterations=1)
+    edge_mask = cv2.morphologyEx(
+        edge_mask,
+        cv2.MORPH_CLOSE,
+        np.ones((11, 11), dtype=np.uint8),
+    )
+
+    candidate_mask = cv2.bitwise_or(bright_mask, edge_mask)
 
     label_count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate_mask, 8)
     best_mask = None

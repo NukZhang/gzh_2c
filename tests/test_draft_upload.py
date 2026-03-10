@@ -38,6 +38,24 @@ def add_watermark_overlay(image):
     return Image.alpha_composite(image.convert("RGBA"), watermark).convert("RGB")
 
 
+def add_qr_like_badge(image):
+    draw = ImageDraw.Draw(image)
+    badge_size = 108
+    cell_size = 12
+    left = image.width - badge_size - 28
+    top = image.height - badge_size - 28
+
+    for row in range(badge_size // cell_size):
+        for col in range(badge_size // cell_size):
+            color = (35, 35, 35) if (row + col) % 2 == 0 else (165, 165, 165)
+            x0 = left + col * cell_size
+            y0 = top + row * cell_size
+            draw.rectangle((x0, y0, x0 + cell_size - 2, y0 + cell_size - 2), fill=color)
+
+    draw.rectangle((left, top + badge_size - 16, left + badge_size, top + badge_size), fill=(25, 25, 25))
+    return image
+
+
 def roi_difference(left_image, right_image, roi_ratio=0.3):
     width, height = left_image.size
     roi = (
@@ -54,9 +72,22 @@ def roi_difference(left_image, right_image, roi_ratio=0.3):
 def test_remove_watermark_preserves_size_and_changes_watermarked_region():
     source = add_watermark_overlay(create_base_image())
     source_bytes = encode_image(source)
+    source_decoded = decode_image(source_bytes)
 
     cleaned_bytes = draft_upload.remove_watermark(source_bytes)
     cleaned = decode_image(cleaned_bytes)
 
-    assert cleaned.size == source.size
-    assert roi_difference(source, cleaned) > 0
+    assert cleaned.size == source_decoded.size
+    assert roi_difference(source_decoded, cleaned) > 0
+
+
+def test_remove_watermark_cleans_qr_like_badge():
+    source = add_qr_like_badge(create_base_image(color=(90, 135, 175)))
+    source_bytes = encode_image(source)
+    source_decoded = decode_image(source_bytes)
+
+    cleaned_bytes = draft_upload.remove_watermark(source_bytes)
+    cleaned = decode_image(cleaned_bytes)
+
+    assert cleaned.size == source_decoded.size
+    assert roi_difference(source_decoded, cleaned) > 5000
