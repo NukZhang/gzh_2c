@@ -238,3 +238,22 @@ def upload_processed_images(processed_result, upload_image_fn):
             "attempted": len(uploaded),
         },
     }
+
+
+def build_image_map(processed_result, value_getter):
+    image_map = {}
+    for item in processed_result["images"]:
+        if item.get("status") not in {"processed", "unchanged"}:
+            continue
+        value = value_getter(item)
+        if value:
+            image_map["image{}".format(item["index"])] = value
+    return image_map
+
+
+def get_processed_image(processed_result, image_key):
+    index = int(image_key.replace("image", ""))
+    for item in processed_result["images"]:
+        if item["index"] == index:
+            return item
+    raise ValueError("processed image not found: {}".format(image_key))

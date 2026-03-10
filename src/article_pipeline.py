@@ -1,5 +1,8 @@
 import argparse
+import json
+import os
 
+import article_drafts
 import article_tools
 import draft_upload
 
@@ -15,8 +18,10 @@ def build_parser():
 
     upload_parser = subparsers.add_parser("upload", help="Upload processed article images.")
     upload_parser.add_argument("--url", required=True, help="WeChat article URL")
+    upload_parser.add_argument("--markdown", help="Local markdown draft file")
     upload_parser.add_argument("--limit", type=int, default=None, help="Limit processed image count")
     upload_parser.add_argument("--dry-run", action="store_true", help="Process but do not upload")
+    upload_parser.add_argument("--output", help="Directory for dry-run preview artifacts")
 
     return parser
 
@@ -33,14 +38,35 @@ def run_analyze(args):
 
 
 def run_upload(args):
+    if not args.markdown:
+        raise SystemExit("upload mode requires --markdown")
+
+    draft = article_drafts.load_markdown_draft(args.markdown)
     processed = article_tools.prepare_article_images(
         args.url,
         limit=args.limit,
         analyze_image_fn=draft_upload.analyze_watermark,
     )
     print("上传前处理完成: {} 张图片".format(processed["counts"]["total"]))
+    preview_image_map = article_tools.build_image_map(processed, lambda item: item["url"])
+    rendered_html = article_drafts.render_markdown_body(draft["body"], preview_image_map)
+    cover_key = article_drafts.resolve_cover_image_key(draft["meta"], preview_image_map)
 
     if args.dry_run:
+        preview_payload = article_drafts.build_article_payload(
+            draft,
+            rendered_html=rendered_html,
+            thumb_media_id="dry-run:{}".format(cover_key),
+            default_author="",
+        )
+        if args.output:
+            os.makedirs(args.output, exist_ok=True)
+            with open(os.path.join(args.output, "body.html"), "w", encoding="utf-8") as handle:
+                handle.write(rendered_html)
+            with open(os.path.join(args.output, "article.json"), "w", encoding="utf-8") as handle:
+                json.dump(preview_payload, handle, ensure_ascii=False, indent=2)
+            with open(os.path.join(args.output, "image_map.json"), "w", encoding="utf-8") as handle:
+                json.dump(preview_image_map, handle, ensure_ascii=False, indent=2)
         print("dry-run: 未执行微信上传")
         return 0
 

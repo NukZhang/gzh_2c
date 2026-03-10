@@ -219,6 +219,66 @@ def test_article_pipeline_upload_dry_run_skips_wechat_upload(monkeypatch):
     assert upload_calls == []
 
 
+def test_upload_dry_run_writes_preview_files(tmp_path, monkeypatch):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+digest: 示例摘要
+content_source_url: https://example.com/article
+cover_image: image1
+---
+
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        article_tools,
+        "prepare_article_images",
+        lambda article_url, limit=None, session=None, analyze_image_fn=None, download_image_fn=None: {
+            "images": [
+                {
+                    "index": 1,
+                    "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                    "size": [120, 80],
+                    "score": 0.81,
+                    "mask_pixels": 50,
+                    "changed": True,
+                    "diff_sum": 1234,
+                    "status": "processed",
+                    "error": None,
+                    "cleaned_bytes": b"processed",
+                }
+            ],
+            "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+        },
+    )
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--markdown",
+            str(markdown_path),
+            "--dry-run",
+            "--output",
+            str(tmp_path / "preview"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert (tmp_path / "preview" / "body.html").exists()
+    assert (tmp_path / "preview" / "article.json").exists()
+    assert (tmp_path / "preview" / "image_map.json").exists()
+
+
 def test_legacy_fetch_article_images_uses_shared_extractor(monkeypatch):
     import draft_upload
 
