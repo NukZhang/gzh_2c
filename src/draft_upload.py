@@ -12,6 +12,8 @@ from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+WATERMARK_CONFIDENCE_THRESHOLD = 0.55
+
 def load_config():
     with open('wechat.yml', 'r', encoding='utf-8') as f:
         return yaml.safe_load(f)
@@ -171,7 +173,7 @@ def remove_watermark(image_data):
         image_bgr = load_image_array(image_data)
         mask, roi_bounds, score = detect_watermark_mask(image_bgr)
 
-        if score < 0.6 or np.count_nonzero(mask) == 0:
+        if score < WATERMARK_CONFIDENCE_THRESHOLD or np.count_nonzero(mask) == 0:
             print("    未检测到高置信度水印，保留原图")
             return image_data
 

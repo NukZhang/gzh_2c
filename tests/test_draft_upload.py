@@ -202,3 +202,30 @@ print(mask.shape, roi_bounds, score)
     )
 
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_remove_watermark_accepts_borderline_confidence(monkeypatch):
+    source = add_qr_like_badge(create_base_image(color=(90, 135, 175)))
+    source_bytes = encode_image(source)
+    source_decoded = decode_image(source_bytes)
+
+    image_bgr = draft_upload.load_image_array(source_bytes)
+    full_mask = np.zeros((image_bgr.shape[0], image_bgr.shape[1]), dtype=np.uint8)
+    full_mask[-40:, -40:] = 255
+    roi_bounds = (
+        image_bgr.shape[1] - 270,
+        image_bgr.shape[0] - 132,
+        270,
+        132,
+    )
+
+    def fake_detect(_image_bgr):
+        return full_mask, roi_bounds, 0.57
+
+    monkeypatch.setattr(draft_upload, "detect_watermark_mask", fake_detect)
+
+    cleaned_bytes = draft_upload.remove_watermark(source_bytes)
+    cleaned = decode_image(cleaned_bytes)
+
+    assert cleaned.size == source_decoded.size
+    assert roi_difference(source_decoded, cleaned) > 0
