@@ -1,0 +1,7 @@
+requests
+PyYAML
+numpy
+Pillow
+playwright
+opencv-python
+pytest
