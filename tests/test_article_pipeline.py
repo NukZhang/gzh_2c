@@ -164,29 +164,36 @@ def test_analyze_article_continues_when_one_image_download_fails(tmp_path, monke
     assert summary["counts"]["failed"] == 1
 
 
-def test_article_pipeline_upload_dry_run_skips_wechat_upload(monkeypatch):
+def test_article_pipeline_upload_dry_run_skips_wechat_upload(tmp_path, monkeypatch):
     import article_pipeline
 
-    events = []
-    html = """
-    <img class="rich_pages wxw-img" data-src="https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&amp;from=appmsg" />
-    """
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+digest: 示例摘要
+content_source_url: https://example.com/article
+cover_image: image1
+---
 
-    monkeypatch.setattr(
-        article_tools,
-        "fetch_article_html",
-        lambda article_url, session=None, user_agent=None, timeout=20: events.append("fetch") or html,
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
     )
+
+    events = []
     monkeypatch.setattr(
         article_tools,
-        "process_article_images",
-        lambda image_urls, output_dir=None, save_images=False, download_image_fn=None, analyze_image_fn=None, session=None: (
-            events.append("process")
+        "prepare_article_images",
+        lambda article_url, limit=None, session=None, analyze_image_fn=None, download_image_fn=None: (
+            events.append("prepare")
             or {
                 "images": [
                     {
                         "index": 1,
-                        "url": image_urls[0],
+                        "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
                         "size": [120, 80],
                         "score": 0.81,
                         "mask_pixels": 50,
@@ -211,11 +218,18 @@ def test_article_pipeline_upload_dry_run_skips_wechat_upload(monkeypatch):
     )
 
     exit_code = article_pipeline.main(
-        ["upload", "--url", "https://mp.weixin.qq.com/s/example", "--dry-run"]
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--markdown",
+            str(markdown_path),
+            "--dry-run",
+        ]
     )
 
     assert exit_code == 0
-    assert events == ["fetch", "process"]
+    assert events == ["prepare"]
     assert upload_calls == []
 
 
@@ -297,3 +311,76 @@ def test_legacy_fetch_article_images_uses_shared_extractor(monkeypatch):
         "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
         "https://mmbiz.qpic.cn/mmbiz_jpg/bar/640?wx_fmt=jpeg&from=appmsg",
     ]
+
+
+def test_upload_mode_builds_and_submits_wechat_draft(tmp_path, monkeypatch):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+digest: 示例摘要
+content_source_url: https://example.com/article
+cover_image: image1
+---
+
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    processed = {
+        "images": [
+            {
+                "index": 1,
+                "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                "size": [120, 80],
+                "score": 0.81,
+                "mask_pixels": 50,
+                "changed": True,
+                "diff_sum": 1234,
+                "status": "processed",
+                "error": None,
+                "cleaned_bytes": b"processed-image-bytes",
+            }
+        ],
+        "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+    }
+
+    monkeypatch.setattr(article_tools, "prepare_article_images", lambda *args, **kwargs: processed)
+
+    upload_calls = []
+
+    def fake_upload_image(access_token, image_bytes):
+        upload_calls.append(image_bytes)
+        if len(upload_calls) == 1:
+            return {"url": "https://weixin.example/body-image.jpg", "media_id": "body-media"}
+        return {"media_id": "thumb123", "url": "https://weixin.example/cover-image.jpg"}
+
+    captured = {}
+
+    monkeypatch.setattr("draft_upload.load_config", lambda: {"wechat": {"appid": "a", "secret": "b", "author": "默认作者"}})
+    monkeypatch.setattr("draft_upload.get_access_token", lambda appid, secret: "token123")
+    monkeypatch.setattr("draft_upload.upload_permanent_image", fake_upload_image)
+    monkeypatch.setattr(
+        "draft_upload.upload_draft",
+        lambda access_token, articles: captured.setdefault("articles", articles) or {"media_id": "draft123"},
+    )
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--markdown",
+            str(markdown_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["articles"][0]["title"] == "示例标题"
+    assert captured["articles"][0]["thumb_media_id"] == "thumb123"
+    assert "https://weixin.example/body-image.jpg" in captured["articles"][0]["content"]

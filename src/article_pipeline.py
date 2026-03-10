@@ -75,11 +75,34 @@ def run_upload(args):
         config["wechat"]["appid"],
         config["wechat"]["secret"],
     )
-    upload_result = article_tools.upload_processed_images(
+    body_uploads = article_tools.upload_processed_images(
         processed,
         lambda image_bytes: draft_upload.upload_permanent_image(access_token, image_bytes),
     )
-    print("上传完成: {} 张图片".format(upload_result["counts"]["attempted"]))
+    body_image_map = article_tools.build_image_map(
+        body_uploads,
+        lambda item: item["result"].get("url"),
+    )
+    rendered_html = article_drafts.render_markdown_body(draft["body"], body_image_map)
+    cover_key = article_drafts.resolve_cover_image_key(draft["meta"], body_image_map)
+    cover_item = article_tools.get_processed_image(processed, cover_key)
+    cover_upload = draft_upload.upload_permanent_image(access_token, cover_item["cleaned_bytes"])
+    thumb_media_id = cover_upload.get("media_id")
+    if not thumb_media_id:
+        raise ValueError("cover upload failed: {}".format(cover_upload))
+
+    article_payload = article_drafts.build_article_payload(
+        draft,
+        rendered_html=rendered_html,
+        thumb_media_id=thumb_media_id,
+        default_author=config["wechat"].get("author", ""),
+    )
+    draft_result = draft_upload.upload_draft(access_token, [article_payload])
+    print("上传完成: {} 张图片".format(body_uploads["counts"]["attempted"]))
+    if "media_id" in draft_result:
+        print("草稿创建成功: {}".format(draft_result["media_id"]))
+    else:
+        print("草稿创建结果: {}".format(draft_result))
     return 0
 
 

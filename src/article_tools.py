@@ -243,7 +243,8 @@ def upload_processed_images(processed_result, upload_image_fn):
 def build_image_map(processed_result, value_getter):
     image_map = {}
     for item in processed_result["images"]:
-        if item.get("status") not in {"processed", "unchanged"}:
+        status = item.get("status")
+        if status is not None and status not in {"processed", "unchanged"}:
             continue
         value = value_getter(item)
         if value:
