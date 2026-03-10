@@ -6,6 +6,7 @@ import io
 import re
 import numpy as np
 import base64
+import cv2
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from PIL import Image
 from playwright.sync_api import sync_playwright
@@ -23,87 +24,120 @@ def get_access_token(appid, secret):
     else:
         raise Exception('获取access_token失败: {}'.format(data))
 
-def detect_watermark_by_vision(image_data):
-    try:
-        img = Image.open(io.BytesIO(image_data))
-        width, height = img.size
-        
-        gray = np.array(img.convert('L'))
-        
-        roi_w = int(width * 0.3)
-        roi_h = int(height * 0.2)
-        roi = gray[height - roi_h:height, width - roi_w:width]
-        
-        mean_val = np.mean(roi)
-        std_val = np.std(roi)
-        
-        threshold = mean_val + std_val * 0.5
-        binary = (roi > threshold).astype(np.uint8)
-        
-        rows = np.any(binary, axis=1)
-        cols = np.any(binary, axis=0)
-        
-        if np.any(rows) and np.any(cols):
-            row_indices = np.where(rows)[0]
-            col_indices = np.where(cols)[0]
-            
-            min_row = np.min(row_indices)
-            min_col = np.min(col_indices)
-            
-            watermark_y = height - roi_h + min_row
-            watermark_x = width - roi_w + min_col
-            
-            padding = 30
-            crop_x = max(0, watermark_x - padding)
-            crop_y = max(0, watermark_y - padding)
-            
-            print("    检测到水印起点: ({}, {})".format(watermark_x, watermark_y))
-            
-            if watermark_x > width * 0.4 and watermark_y > height * 0.4:
-                return (0, 0, crop_x, crop_y)
-        
-        return None
-    except Exception as e:
-        print("    水印检测失败: {}".format(e))
-        return None
+def load_image_array(image_data):
+    img = Image.open(io.BytesIO(image_data))
+    rgb = np.array(img.convert('RGB'))
+    return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+
+
+def encode_image_array(image_bgr, quality=95):
+    rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+    output = io.BytesIO()
+    Image.fromarray(rgb).save(output, format='JPEG', quality=quality)
+    return output.getvalue()
+
+
+def score_watermark_candidate(component_mask):
+    ys, xs = np.where(component_mask > 0)
+    if len(xs) == 0 or len(ys) == 0:
+        return 0.0
+
+    roi_h, roi_w = component_mask.shape
+    area = float(len(xs))
+    area_ratio = area / float(roi_h * roi_w)
+    x_min, x_max = xs.min(), xs.max()
+    y_min, y_max = ys.min(), ys.max()
+    bbox_area = float((x_max - x_min + 1) * (y_max - y_min + 1))
+    fill_ratio = area / max(bbox_area, 1.0)
+    touch_right = x_max >= roi_w - max(6, int(roi_w * 0.06))
+    touch_bottom = y_max >= roi_h - max(6, int(roi_h * 0.08))
+
+    score = min(area_ratio / 0.08, 0.35)
+    if touch_right:
+        score += 0.25
+    if touch_bottom:
+        score += 0.25
+    if fill_ratio >= 0.18:
+        score += 0.15
+
+    return score
+
+
+def detect_watermark_mask(image_bgr):
+    height, width = image_bgr.shape[:2]
+    roi_w = max(1, int(width * 0.30))
+    roi_h = max(1, int(height * 0.22))
+    x0 = width - roi_w
+    y0 = height - roi_h
+    roi = image_bgr[y0:height, x0:width]
+
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    value = hsv[:, :, 2]
+    saturation = hsv[:, :, 1]
+
+    value_threshold = max(185, int(np.mean(value) + 18))
+    candidate_mask = np.where((value >= value_threshold) & (saturation <= 115), 255, 0).astype(np.uint8)
+    candidate_mask = cv2.morphologyEx(
+        candidate_mask,
+        cv2.MORPH_CLOSE,
+        np.ones((5, 5), dtype=np.uint8),
+    )
+    candidate_mask = cv2.morphologyEx(
+        candidate_mask,
+        cv2.MORPH_OPEN,
+        np.ones((3, 3), dtype=np.uint8),
+    )
+
+    label_count, labels, stats, _ = cv2.connectedComponentsWithStats(candidate_mask, 8)
+    best_mask = None
+    best_score = 0.0
+    min_area = max(120, int(roi_w * roi_h * 0.005))
+
+    for label in range(1, label_count):
+        area = stats[label, cv2.CC_STAT_AREA]
+        if area < min_area:
+            continue
+
+        component_mask = np.where(labels == label, 255, 0).astype(np.uint8)
+        score = score_watermark_candidate(component_mask)
+        if score > best_score:
+            best_score = score
+            best_mask = component_mask
+
+    full_mask = np.zeros((height, width), dtype=np.uint8)
+    roi_bounds = (x0, y0, roi_w, roi_h)
+
+    if best_mask is None:
+        return full_mask, roi_bounds, 0.0
+
+    best_mask = cv2.dilate(best_mask, np.ones((5, 5), dtype=np.uint8), iterations=1)
+    full_mask[y0:height, x0:width] = best_mask
+    return full_mask, roi_bounds, best_score
+
+
+def inpaint_watermark(image_bgr, mask, roi_bounds):
+    x0, y0, roi_w, roi_h = roi_bounds
+    cleaned = image_bgr.copy()
+    roi_image = cleaned[y0:y0 + roi_h, x0:x0 + roi_w]
+    roi_mask = mask[y0:y0 + roi_h, x0:x0 + roi_w]
+    cleaned[y0:y0 + roi_h, x0:x0 + roi_w] = cv2.inpaint(roi_image, roi_mask, 3, cv2.INPAINT_TELEA)
+    return cleaned
 
 def remove_watermark(image_data):
     try:
-        img = Image.open(io.BytesIO(image_data))
-        width, height = img.size
-        
-        crop_box = detect_watermark_by_vision(image_data)
-        
-        if crop_box:
-            box = (0, 0, max(crop_box[2], int(width * 0.5)), max(crop_box[3], int(height * 0.5)))
-            cropped = img.crop(box)
-            print("    裁剪到: ({}, {}, {}, {})".format(*box))
-        else:
-            print("    未检测到水印，使用默认裁剪")
-            crop_width = int(width * 0.22)
-            crop_height = int(height * 0.12)
-            box = (0, 0, width - crop_width, height - crop_height)
-            cropped = img.crop(box)
-        
-        output = io.BytesIO()
-        if cropped.mode in ('RGBA', 'P'):
-            cropped = cropped.convert('RGB')
-        cropped.save(output, format='JPEG', quality=95)
-        return output.getvalue()
-    except Exception as e:
-        print("    图像处理失败: {}，使用默认裁剪".format(e))
-        try:
-            img = Image.open(io.BytesIO(image_data))
-            width, height = img.size
-            box = (0, 0, int(width * 0.78), int(height * 0.88))
-            cropped = img.crop(box)
-            output = io.BytesIO()
-            if cropped.mode in ('RGBA', 'P'):
-                cropped = cropped.convert('RGB')
-            cropped.save(output, format='JPEG', quality=95)
-            return output.getvalue()
-        except:
+        image_bgr = load_image_array(image_data)
+        mask, roi_bounds, score = detect_watermark_mask(image_bgr)
+
+        if score < 0.6 or np.count_nonzero(mask) == 0:
+            print("    未检测到高置信度水印，保留原图")
             return image_data
+
+        print("    检测到水印，置信度: {:.2f}".format(score))
+        cleaned = inpaint_watermark(image_bgr, mask, roi_bounds)
+        return encode_image_array(cleaned, quality=95)
+    except Exception as e:
+        print("    图像处理失败: {}，保留原图".format(e))
+        return image_data
 
 def modify_image_md5(image_data):
     return image_data + b'\x00'
