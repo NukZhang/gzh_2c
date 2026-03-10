@@ -10,3 +10,6 @@ build/
 
 # Logs
 *.log
+
+# WeChat config (contains secrets)
+wechat.yml
