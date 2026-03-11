@@ -1,34 +1,93 @@
-# Spec-Driven AICoding（SDAC）
+# WeChat Article Republish Skills
 
-> **Make AI Executable, Not Creative.**  
-> A governance-first methodology for AI-assisted software engineering.
+这个仓库专门用于“公众号链接二创并进入公众号草稿箱”。
 
-本仓库是 SDAC（Spec-Driven AICoding）对外发布的"工程化模板"，包含：
+仓库职责很明确：
 
-- 白皮书（方法论 + 实战示例，含 Mermaid 架构图）
-- Spec 分权模板（Me2AI / AI2AI）
-- SDAC 治理工具链（Checklist / 自我裁决 / Minimal Fix Diff / 状态压缩 / 一键总控）
-- 子 Skill 模板（Weapon / AI / State Machine）
-- Claude-Flow 编排模板（可选：多代理 + 共享记忆 + 工作流串联）
+- 读取公众号原文和图片
+- 校验二创 Markdown 是否符合上传约定
+- 生成 dry-run 预览产物
+- 上传图片并创建公众号草稿
+- 为多种 AI 宿主提供统一的 skill / adapter 入口
 
-## 快速使用（3 分钟）
+创作本身由宿主 AI 完成；这个仓库负责确定性的处理、校验和上传。
 
-1) 阅读白皮书：`docs/zh/whitepaper.md`  
-2) 阅读快速上手：`docs/zh/quickstart.md`  
-3) 在真实项目中复制 `spec/` 目录（建议整个目录原样拷贝）  
-4) 人类只维护 `spec/Me2AI/*`  
-5) AI 只维护 `spec/AI2AI/AI2AI.md`，并严格遵循 `spec/SKILL.md`
+## Supported Adapters
 
-## 目录导航
+- 通用核心 skill：`skills/wechat-article-republish/`
+- Codex / Claude Code：`skills/codex-wechat-article-republish/`
+- Trae：`skills/trae-wechat-article-republish/`
+- iFlow CLI：`IFLOW.md`
 
-- 白皮书：`docs/zh/whitepaper.md`
-- 快速上手：`docs/zh/quickstart.md`
-- Claude-Flow 编排包：`docs/zh/claude-flow-pack.md`
-- 执行规范（AI 必读）：`spec/SKILL.md`
-- 一键总控 Prompt：`spec/OneKey_Control_Prompt.md`
-- SDAC-Team 协作规则：`spec-team/SDAC-Team.md`
-- 工具索引：`tools/README.md`
+## Quick Start
 
-## 许可
+1. 安装依赖：
 
-MIT License，见 `LICENSE`。
+   ```bash
+   python3 -m pip install -r requirements.txt
+   ```
+
+2. 准备 `wechat.yml`，写入公众号 `appid`、`secret`，可选 `author`。
+3. 让宿主 AI 先产出符合约定的 Markdown，或直接使用自动改写模式。
+
+## Core Commands
+
+分析原文图片：
+
+```bash
+python3 src/article_pipeline.py analyze \
+  --url '<article_url>' \
+  --output .tmp/article_analysis
+```
+
+用已有 Markdown 做 dry-run 预览：
+
+```bash
+python3 src/article_pipeline.py upload \
+  --url '<article_url>' \
+  --markdown <generated.md> \
+  --dry-run \
+  --output .tmp/preview
+```
+
+确认预览后真实上传：
+
+```bash
+python3 src/article_pipeline.py upload \
+  --url '<article_url>' \
+  --markdown <generated.md>
+```
+
+使用本地 AI CLI 自动生成草稿：
+
+```bash
+python3 src/article_pipeline.py upload \
+  --url '<article_url>' \
+  --thought '这里写你的观点' \
+  --ai-command 'codex exec --skip-git-repo-check --color never' \
+  --dry-run \
+  --output .tmp/preview
+```
+
+自动改写模式默认使用的人设文件在 `skills/wechat-article-republish/references/persona.md`。
+
+## Directory Map
+
+- `src/`: CLI、Markdown 校验、原文抓取、图片处理、上传逻辑
+- `tests/`: pipeline、draft、source、AI rewrite 相关测试
+- `skills/`: 通用 skill 与适配器
+- `iflow/examples/`: iFlow 对话示例
+- `tools/package.sh`: 打包脚本
+- `docs/superpowers/`: 本仓库内部保留的设计和计划记录
+
+## Main Entry Files
+
+- 通用 skill：`skills/wechat-article-republish/SKILL.md`
+- Markdown 约定：`skills/wechat-article-republish/references/markdown-contract.md`
+- 命令流程：`skills/wechat-article-republish/references/workflow.md`
+- iFlow 入口：`IFLOW.md`
+- iFlow 示例：`iflow/examples/wechat-article-republish.md`
+
+## License
+
+MIT，见 `LICENSE`。

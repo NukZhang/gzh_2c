@@ -58,9 +58,7 @@ def _normalize_draft_meta(meta, body_markdown, fallback_source_url=None):
     return normalized
 
 
-def load_markdown_draft(markdown_path, fallback_source_url=None):
-    text = Path(markdown_path).read_text(encoding="utf-8")
-
+def load_markdown_draft_text(text, fallback_source_url=None):
     if not text.startswith("---\n"):
         raise ValueError("markdown draft must start with YAML frontmatter")
 
@@ -78,6 +76,11 @@ def load_markdown_draft(markdown_path, fallback_source_url=None):
         "meta": meta,
         "body": body,
     }
+
+
+def load_markdown_draft(markdown_path, fallback_source_url=None):
+    text = Path(markdown_path).read_text(encoding="utf-8")
+    return load_markdown_draft_text(text, fallback_source_url=fallback_source_url)
 
 
 def _render_inline(text):

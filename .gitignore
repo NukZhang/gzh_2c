@@ -8,6 +8,12 @@ build/
 .idea/
 .vscode/
 
+# Python / Test cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.tmp/
+
 # Logs
 *.log
 

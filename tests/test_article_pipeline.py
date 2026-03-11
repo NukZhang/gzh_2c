@@ -534,3 +534,217 @@ cover_image: image1
     assert captured["articles"][0]["title"] == "示例标题"
     assert captured["articles"][0]["thumb_media_id"] == "thumb123"
     assert "https://weixin.example/body-image.jpg" in captured["articles"][0]["content"]
+
+
+def test_upload_dry_run_generates_markdown_via_ai_cli(tmp_path, monkeypatch):
+    import article_drafts
+    import article_pipeline
+    import article_source
+    import ai_rewrite
+
+    source_article = {
+        "title": "原文标题",
+        "body_markdown": "原文第一段。\n\n{{image1}}",
+        "blocks": [
+            {"type": "paragraph", "text": "原文第一段。", "level": None},
+            {"type": "image", "key": "image1", "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png"},
+        ],
+        "image_keys": ["image1"],
+    }
+
+    processed = {
+        "images": [
+            {
+                "index": 1,
+                "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                "size": [120, 80],
+                "score": 0.81,
+                "mask_pixels": 50,
+                "changed": True,
+                "diff_sum": 1234,
+                "status": "processed",
+                "error": None,
+                "cleaned_bytes": b"processed-image-bytes",
+            }
+        ],
+        "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+    }
+
+    monkeypatch.setattr(article_tools, "fetch_article_html", lambda *args, **kwargs: "<html>...</html>")
+    monkeypatch.setattr(article_source, "extract_source_article", lambda html: source_article)
+    monkeypatch.setattr(article_tools, "prepare_article_images", lambda *args, **kwargs: processed)
+
+    captured = {}
+
+    def fake_generate_markdown_draft(**kwargs):
+        captured.update(kwargs)
+        markdown = """---
+title: 新标题
+content_source_url: https://mp.weixin.qq.com/s/example
+cover_image: image1
+---
+
+新正文。
+
+{{image1}}
+"""
+        return {
+            "command": "fake-ai",
+            "prompt": "prompt text",
+            "markdown": markdown,
+            "draft": article_drafts.load_markdown_draft_text(markdown),
+        }
+
+    monkeypatch.setattr(ai_rewrite, "generate_markdown_draft", fake_generate_markdown_draft)
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--thought",
+            "我的思考",
+            "--dry-run",
+            "--output",
+            str(tmp_path / "preview"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured["thought_text"] == "我的思考"
+    assert (tmp_path / "preview" / "source.json").exists()
+    assert (tmp_path / "preview" / "prompt.txt").exists()
+    assert (tmp_path / "preview" / "generated.md").exists()
+    preview = json.loads((tmp_path / "preview" / "article.json").read_text(encoding="utf-8"))
+    assert preview["title"] == "新标题"
+
+
+def test_upload_mode_rejects_markdown_and_thought_together(tmp_path):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+content_source_url: https://example.com/article
+cover_image: image1
+---
+
+正文
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(SystemExit):
+        article_pipeline.main(
+            [
+                "upload",
+                "--url",
+                "https://mp.weixin.qq.com/s/example",
+                "--markdown",
+                str(markdown_path),
+                "--thought",
+                "额外想法",
+            ]
+        )
+
+
+def test_upload_mode_submits_generated_draft_from_thought_file(tmp_path, monkeypatch):
+    import article_drafts
+    import article_pipeline
+    import article_source
+    import ai_rewrite
+
+    thought_path = tmp_path / "thought.txt"
+    thought_path.write_text("文件里的思考", encoding="utf-8")
+
+    source_article = {
+        "title": "原文标题",
+        "body_markdown": "原文第一段。\n\n{{image1}}",
+        "blocks": [
+            {"type": "paragraph", "text": "原文第一段。", "level": None},
+            {"type": "image", "key": "image1", "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png"},
+        ],
+        "image_keys": ["image1"],
+    }
+
+    processed = {
+        "images": [
+            {
+                "index": 1,
+                "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                "size": [120, 80],
+                "score": 0.81,
+                "mask_pixels": 50,
+                "changed": True,
+                "diff_sum": 1234,
+                "status": "processed",
+                "error": None,
+                "cleaned_bytes": b"processed-image-bytes",
+            }
+        ],
+        "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+    }
+
+    monkeypatch.setattr(article_tools, "fetch_article_html", lambda *args, **kwargs: "<html>...</html>")
+    monkeypatch.setattr(article_source, "extract_source_article", lambda html: source_article)
+    monkeypatch.setattr(article_tools, "prepare_article_images", lambda *args, **kwargs: processed)
+
+    captured_generation = {}
+
+    def fake_generate_markdown_draft(**kwargs):
+        captured_generation.update(kwargs)
+        markdown = """---
+title: AI 新标题
+content_source_url: https://mp.weixin.qq.com/s/example
+cover_image: image1
+---
+
+AI 生成正文。
+
+{{image1}}
+"""
+        return {
+            "command": "fake-ai",
+            "prompt": "prompt text",
+            "markdown": markdown,
+            "draft": article_drafts.load_markdown_draft_text(markdown),
+        }
+
+    monkeypatch.setattr(ai_rewrite, "generate_markdown_draft", fake_generate_markdown_draft)
+
+    upload_calls = []
+
+    def fake_upload_image(access_token, image_bytes):
+        upload_calls.append(image_bytes)
+        if len(upload_calls) == 1:
+            return {"url": "https://weixin.example/body-image.jpg", "media_id": "body-media"}
+        return {"media_id": "thumb123", "url": "https://weixin.example/cover-image.jpg"}
+
+    captured = {}
+
+    monkeypatch.setattr("draft_upload.load_config", lambda: {"wechat": {"appid": "a", "secret": "b", "author": "默认作者"}})
+    monkeypatch.setattr("draft_upload.get_access_token", lambda appid, secret: "token123")
+    monkeypatch.setattr("draft_upload.upload_permanent_image", fake_upload_image)
+    monkeypatch.setattr(
+        "draft_upload.upload_draft",
+        lambda access_token, articles: captured.setdefault("articles", articles) or {"media_id": "draft123"},
+    )
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--thought-file",
+            str(thought_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_generation["thought_text"] == "文件里的思考"
+    assert captured["articles"][0]["title"] == "AI 新标题"
+    assert captured["articles"][0]["thumb_media_id"] == "thumb123"
+    assert "https://weixin.example/body-image.jpg" in captured["articles"][0]["content"]

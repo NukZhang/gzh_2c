@@ -1,8 +1,11 @@
 import argparse
 import json
 import os
+from pathlib import Path
 
+import ai_rewrite
 import article_drafts
+import article_source
 import article_tools
 import draft_upload
 
@@ -18,7 +21,11 @@ def build_parser():
 
     upload_parser = subparsers.add_parser("upload", help="Upload processed article images.")
     upload_parser.add_argument("--url", required=True, help="WeChat article URL")
-    upload_parser.add_argument("--markdown", help="Local markdown draft file")
+    input_group = upload_parser.add_mutually_exclusive_group()
+    input_group.add_argument("--markdown", help="Local markdown draft file")
+    input_group.add_argument("--thought", help="Thought text for automatic AI rewrite mode")
+    input_group.add_argument("--thought-file", help="Thought text file for automatic AI rewrite mode")
+    upload_parser.add_argument("--ai-command", help="Local AI CLI command for automatic rewrite mode")
     upload_parser.add_argument("--limit", type=int, default=None, help="Limit processed image count")
     upload_parser.add_argument("--dry-run", action="store_true", help="Process but do not upload")
     upload_parser.add_argument("--output", help="Directory for dry-run preview artifacts")
@@ -37,14 +44,62 @@ def run_analyze(args):
     return 0
 
 
-def run_upload(args):
-    if not args.markdown:
-        raise SystemExit("upload mode requires --markdown")
+def _read_thought_text(args):
+    if args.thought is not None:
+        return args.thought
+    if args.thought_file:
+        return Path(args.thought_file).read_text(encoding="utf-8")
+    return None
 
-    draft = article_drafts.load_markdown_draft(
-        args.markdown,
-        fallback_source_url=args.url,
+
+def _load_upload_draft(args):
+    if args.markdown:
+        return article_drafts.load_markdown_draft(
+            args.markdown,
+            fallback_source_url=args.url,
+        ), {}
+
+    thought_text = _read_thought_text(args)
+    if thought_text is None:
+        raise SystemExit("upload mode requires --markdown or --thought/--thought-file")
+
+    source_html = article_tools.fetch_article_html(args.url)
+    source_article = article_source.extract_source_article(source_html)
+    generation = ai_rewrite.generate_markdown_draft(
+        source_article=source_article,
+        source_url=args.url,
+        thought_text=thought_text,
+        ai_command=args.ai_command,
     )
+    return generation["draft"], {
+        "source_article": source_article,
+        "prompt": generation["prompt"],
+        "generated_markdown": generation["markdown"],
+    }
+
+
+def _write_preview_artifacts(output_dir, rendered_html, preview_payload, image_map, generation_artifacts=None):
+    os.makedirs(output_dir, exist_ok=True)
+    with open(os.path.join(output_dir, "body.html"), "w", encoding="utf-8") as handle:
+        handle.write(rendered_html)
+    with open(os.path.join(output_dir, "article.json"), "w", encoding="utf-8") as handle:
+        json.dump(preview_payload, handle, ensure_ascii=False, indent=2)
+    with open(os.path.join(output_dir, "image_map.json"), "w", encoding="utf-8") as handle:
+        json.dump(image_map, handle, ensure_ascii=False, indent=2)
+
+    if not generation_artifacts:
+        return
+
+    with open(os.path.join(output_dir, "source.json"), "w", encoding="utf-8") as handle:
+        json.dump(generation_artifacts["source_article"], handle, ensure_ascii=False, indent=2)
+    with open(os.path.join(output_dir, "prompt.txt"), "w", encoding="utf-8") as handle:
+        handle.write(generation_artifacts["prompt"])
+    with open(os.path.join(output_dir, "generated.md"), "w", encoding="utf-8") as handle:
+        handle.write(generation_artifacts["generated_markdown"])
+
+
+def run_upload(args):
+    draft, generation_artifacts = _load_upload_draft(args)
     processed = article_tools.prepare_article_images(
         args.url,
         limit=args.limit,
@@ -63,13 +118,13 @@ def run_upload(args):
             default_author="",
         )
         if args.output:
-            os.makedirs(args.output, exist_ok=True)
-            with open(os.path.join(args.output, "body.html"), "w", encoding="utf-8") as handle:
-                handle.write(rendered_html)
-            with open(os.path.join(args.output, "article.json"), "w", encoding="utf-8") as handle:
-                json.dump(preview_payload, handle, ensure_ascii=False, indent=2)
-            with open(os.path.join(args.output, "image_map.json"), "w", encoding="utf-8") as handle:
-                json.dump(preview_image_map, handle, ensure_ascii=False, indent=2)
+            _write_preview_artifacts(
+                args.output,
+                rendered_html,
+                preview_payload,
+                preview_image_map,
+                generation_artifacts=generation_artifacts or None,
+            )
         print("dry-run: 未执行微信上传")
         return 0
 
