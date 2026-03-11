@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -287,6 +288,63 @@ cover_image: image1
     assert exit_code == 0
 
 
+def test_upload_dry_run_accepts_markdown_without_cover_image_or_source_url(tmp_path, monkeypatch):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+---
+
+第一段正文，应该自动生成摘要。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        article_tools,
+        "prepare_article_images",
+        lambda article_url, limit=None, session=None, analyze_image_fn=None, download_image_fn=None: {
+            "images": [
+                {
+                    "index": 1,
+                    "url": "https://mmbiz.qpic.cn/mmbiz_png/foo/640?wx_fmt=png&from=appmsg",
+                    "size": [120, 80],
+                    "score": 0.81,
+                    "mask_pixels": 50,
+                    "changed": True,
+                    "diff_sum": 1234,
+                    "status": "processed",
+                    "error": None,
+                    "cleaned_bytes": b"processed",
+                }
+            ],
+            "counts": {"total": 1, "processed": 1, "unchanged": 0, "failed": 0},
+        },
+    )
+
+    exit_code = article_pipeline.main(
+        [
+            "upload",
+            "--url",
+            "https://mp.weixin.qq.com/s/example",
+            "--markdown",
+            str(markdown_path),
+            "--dry-run",
+            "--output",
+            str(tmp_path / "preview"),
+        ]
+    )
+
+    assert exit_code == 0
+    preview = json.loads((tmp_path / "preview" / "article.json").read_text(encoding="utf-8"))
+    assert preview["content_source_url"] == "https://mp.weixin.qq.com/s/example"
+    assert preview["thumb_media_id"] == "dry-run:image1"
+
+
 def test_upload_dry_run_writes_preview_files(tmp_path, monkeypatch):
     import article_pipeline
 
@@ -345,6 +403,44 @@ cover_image: image1
     assert (tmp_path / "preview" / "body.html").exists()
     assert (tmp_path / "preview" / "article.json").exists()
     assert (tmp_path / "preview" / "image_map.json").exists()
+
+
+def test_upload_requires_title_from_markdown_or_ai(tmp_path, monkeypatch):
+    import article_pipeline
+
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+content_source_url: https://example.com/article
+---
+
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        article_tools,
+        "prepare_article_images",
+        lambda article_url, limit=None, session=None, analyze_image_fn=None, download_image_fn=None: {
+            "images": [],
+            "counts": {"total": 0, "processed": 0, "unchanged": 0, "failed": 0},
+        },
+    )
+
+    with pytest.raises(ValueError, match="AI"):
+        article_pipeline.main(
+            [
+                "upload",
+                "--url",
+                "https://mp.weixin.qq.com/s/example",
+                "--markdown",
+                str(markdown_path),
+                "--dry-run",
+            ]
+        )
 
 
 def test_legacy_fetch_article_images_uses_shared_extractor(monkeypatch):

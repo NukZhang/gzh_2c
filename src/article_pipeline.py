@@ -41,7 +41,10 @@ def run_upload(args):
     if not args.markdown:
         raise SystemExit("upload mode requires --markdown")
 
-    draft = article_drafts.load_markdown_draft(args.markdown)
+    draft = article_drafts.load_markdown_draft(
+        args.markdown,
+        fallback_source_url=args.url,
+    )
     processed = article_tools.prepare_article_images(
         args.url,
         limit=args.limit,

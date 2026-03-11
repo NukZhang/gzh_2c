@@ -80,6 +80,68 @@ cover_image: image1
     assert draft["meta"]["digest"] == "手动摘要"
 
 
+def test_load_markdown_draft_derives_cover_image_from_first_placeholder(tmp_path):
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+content_source_url: https://example.com/article
+---
+
+第一段正文。
+
+{{image2}}
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    draft = article_drafts.load_markdown_draft(markdown_path)
+
+    assert draft["meta"]["cover_image"] == "image2"
+
+
+def test_load_markdown_draft_uses_fallback_source_url(tmp_path):
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+title: 示例标题
+---
+
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    draft = article_drafts.load_markdown_draft(
+        markdown_path,
+        fallback_source_url="https://mp.weixin.qq.com/s/fallback",
+    )
+
+    assert draft["meta"]["content_source_url"] == "https://mp.weixin.qq.com/s/fallback"
+
+
+def test_load_markdown_draft_requires_title_from_ai(tmp_path):
+    markdown_path = tmp_path / "article.md"
+    markdown_path.write_text(
+        """---
+content_source_url: https://example.com/article
+---
+
+第一段正文。
+
+{{image1}}
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="AI"):
+        article_drafts.load_markdown_draft(markdown_path)
+
+
 def test_load_markdown_draft_requires_body_text_for_digest(tmp_path):
     markdown_path = tmp_path / "article.md"
     markdown_path.write_text(
